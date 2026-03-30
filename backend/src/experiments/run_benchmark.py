@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,6 +17,15 @@ from src.algorithms import (
     StaticGreedyAllocator,
 )
 from src.environment import FiveGEnvironment, SliceConfig
+
+
+ALGORITHM_ORDER = (
+    "MAAN",
+    "Independent_MAPPO",
+    "C_ADMM",
+    "Static_Greedy",
+    "OMD_BF",
+)
 
 
 @dataclass
@@ -35,15 +44,29 @@ def build_slice_configs(load_scale: float) -> List[SliceConfig]:
     ]
 
 
-def make_algorithms(env: FiveGEnvironment) -> Dict[str, object]:
+def generate_common_traces(s: int, k: int, horizon: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    lambda_trace = rng.uniform(8e5, 4.2e6, size=(horizon + 1, s))
+    channel_trace = rng.exponential(scale=1.0, size=(horizon + 1, s, k))
+    return lambda_trace, channel_trace
+
+
+def make_algorithm(name: str, env: FiveGEnvironment):
     s, k, m = env.s, env.k, env.m
-    return {
-        "MAAN": MAANAllocator(s, k, m, env.b_k, env.c_m, env.t_agg, MAANConfig()),
-        "Independent_MAPPO": IndependentMAPPOAllocator(s, k, m, env.b_k, env.c_m, env.t_agg),
-        "C_ADMM": CADMMAllocator(s, k, m, env.b_k, env.c_m, env.t_agg),
-        "Static_Greedy": StaticGreedyAllocator(np.array([0.45, 0.35, 0.2]), s, k, m, env.b_k, env.c_m, env.t_agg),
-        "OMD_BF": OMDBanditAllocator(s, k, m, env.b_k, env.c_m, env.t_agg),
-    }
+    r_min = np.array([cfg.r_min for cfg in env.slice_configs], dtype=float)
+    d_max = np.array([cfg.d_max for cfg in env.slice_configs], dtype=float)
+    omega = np.array([cfg.omega for cfg in env.slice_configs], dtype=float)
+    if name == "MAAN":
+        return MAANAllocator(s, k, m, env.b_k, env.c_m, env.t_agg, MAANConfig())
+    if name == "Independent_MAPPO":
+        return IndependentMAPPOAllocator(s, k, m, env.b_k, env.c_m, env.t_agg)
+    if name == "C_ADMM":
+        return CADMMAllocator(s, k, m, env.b_k, env.c_m, env.t_agg)
+    if name == "Static_Greedy":
+        return StaticGreedyAllocator(np.array([0.45, 0.35, 0.2]), s, k, m, env.b_k, env.c_m, env.t_agg, r_min=r_min, d_max=d_max, omega=omega)
+    if name == "OMD_BF":
+        return OMDBanditAllocator(s, k, m, env.b_k, env.c_m, env.t_agg, d_max=d_max)
+    raise ValueError(f"Unknown algorithm: {name}")
 
 
 def run_one(name: str, alg, env: FiveGEnvironment, horizon: int) -> pd.DataFrame:
@@ -80,10 +103,19 @@ def run_experiment(cfg: ExpConfig) -> pd.DataFrame:
     frames = []
     for seed in range(cfg.seeds):
         for load_scale in cfg.load_scales:
-            env = FiveGEnvironment(build_slice_configs(load_scale), seed=100 + seed)
-            algs = make_algorithms(env)
-            for name, alg in algs.items():
-                df = run_one(name, alg, env, cfg.horizon)
+            slice_cfgs = build_slice_configs(load_scale)
+            scenario_seed = 100 + 73 * seed + int(round(100 * load_scale))
+            lambda_trace, channel_trace = generate_common_traces(s=len(slice_cfgs), k=3, horizon=cfg.horizon, seed=scenario_seed)
+            for alg_idx, alg_name in enumerate(ALGORITHM_ORDER):
+                np.random.seed(scenario_seed + 31 * (alg_idx + 1))
+                env = FiveGEnvironment(
+                    slice_cfgs,
+                    seed=scenario_seed,
+                    lambda_trace=lambda_trace,
+                    channel_trace=channel_trace,
+                )
+                alg = make_algorithm(alg_name, env)
+                df = run_one(alg_name, alg, env, cfg.horizon)
                 df["seed"] = seed
                 df["load_scale"] = load_scale
                 frames.append(df)
@@ -122,7 +154,6 @@ def plot_all(df: pd.DataFrame, out_dir: Path) -> None:
         plt.savefig(out_dir / f"{metric}_vs_load.png", dpi=150)
         plt.close()
 
-    # 14th plot: convergence trend over time under highest load.
     high = df[df["load_scale"] == df["load_scale"].max()]
     ts = high.groupby(["algorithm", "t"], as_index=False)["utility_mean"].mean()
     plt.figure(figsize=(8, 4))

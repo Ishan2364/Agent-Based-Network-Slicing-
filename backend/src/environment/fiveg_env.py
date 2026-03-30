@@ -29,8 +29,13 @@ class FiveGEnvironment:
         n0: float = 1e-9,
         t_tti: float = 1e-3,
         seed: int = 42,
+        lambda_trace: np.ndarray | None = None,
+        channel_trace: np.ndarray | None = None,
     ) -> None:
-        self.rng = np.random.default_rng(seed)
+        self.seed = int(seed)
+        self.rng_dyn = np.random.default_rng(self.seed)
+        self.rng_eval = np.random.default_rng(self.seed + 1)
+
         self.slice_configs = slice_configs
         self.s = len(slice_configs)
         self.k = num_gnbs
@@ -43,15 +48,25 @@ class FiveGEnvironment:
         self.t_tti = t_tti
         self.pk = np.ones(self.k, dtype=float)
         self.prices = np.zeros(self.k + self.m + 1, dtype=float)
+
+        self.lambda_trace = None if lambda_trace is None else np.asarray(lambda_trace, dtype=float)
+        self.channel_trace = None if channel_trace is None else np.asarray(channel_trace, dtype=float)
+        if self.lambda_trace is not None and self.lambda_trace.shape[1] != self.s:
+            raise ValueError(f"lambda_trace shape must be [T, {self.s}]")
+        if self.channel_trace is not None and self.channel_trace.shape[1:] != (self.s, self.k):
+            raise ValueError(f"channel_trace shape must be [T, {self.s}, {self.k}]")
+
         self.reset()
 
     def reset(self) -> Dict[str, np.ndarray]:
         self.t = 0
-        self.lambda_s = self.rng.uniform(8e5, 4e6, size=self.s)
-        self.g_sk = self.rng.exponential(scale=1.0, size=(self.s, self.k))
         self.prev_b = np.zeros((self.s, self.k), dtype=float)
         self.prev_c = np.zeros((self.s, self.m), dtype=float)
         self.prev_tau = np.zeros(self.s, dtype=float)
+        self.prev_rates = np.zeros(self.s, dtype=float)
+        self.prev_delays = np.zeros(self.s, dtype=float)
+
+        self.lambda_s, self.g_sk = self._exogenous_at(self.t)
         return self.get_state()
 
     def get_state(self) -> Dict[str, np.ndarray]:
@@ -62,22 +77,26 @@ class FiveGEnvironment:
             "prev_b": self.prev_b.copy(),
             "prev_c": self.prev_c.copy(),
             "prev_tau": self.prev_tau.copy(),
+            "prev_rates": self.prev_rates.copy(),
+            "prev_delays": self.prev_delays.copy(),
         }
 
     def step(self, actions: Dict[str, np.ndarray]) -> Tuple[Dict, Dict]:
         b_prop = actions["b"].astype(float).copy()
         c_prop = actions["c"].astype(float).copy()
         tau_prop = actions["tau"].astype(float).copy()
-        x = actions["x"].astype(int).copy()
+        x = self._to_one_hot(actions["x"].astype(float))
 
         c_prop = c_prop * x
-        b_act = self._enforce_domain_capacity(b_prop, self.b_k)
+        b_scaled = self._enforce_domain_capacity(b_prop, self.b_k)
         c_act = self._enforce_domain_capacity(c_prop, self.c_m)
         tau_act = tau_prop * min(1.0, self.t_agg / max(np.sum(tau_prop), 1e-8))
-        b_act = self._round_prbs(b_act, self.b_k)
 
         sinr = self._compute_sinr(self.g_sk)
-        rates = np.sum(b_act * self.w_prb * np.log2(1.0 + sinr), axis=1)
+        marginal = self.w_prb * np.log2(1.0 + sinr)
+        b_act = self._round_prbs(b_scaled, self.b_k, marginal)
+
+        rates = np.sum(b_act * marginal, axis=1)
         d_radio = 1.0 / np.maximum(rates - self.lambda_s, 1e3) + self.t_tti
         d_trans = self.lambda_s / np.maximum(tau_act, 1e-6)
         c_slice = np.sum(c_act, axis=1)
@@ -93,9 +112,10 @@ class FiveGEnvironment:
         self.prev_b = b_act.copy()
         self.prev_c = c_act.copy()
         self.prev_tau = tau_act.copy()
-        self.lambda_s = self.rng.uniform(8e5, 4.2e6, size=self.s)
-        self.g_sk = self.rng.exponential(scale=1.0, size=(self.s, self.k))
+        self.prev_rates = rates.copy()
+        self.prev_delays = delays.copy()
         self.t += 1
+        self.lambda_s, self.g_sk = self._exogenous_at(self.t)
 
         metrics = {
             "rates": rates,
@@ -110,27 +130,33 @@ class FiveGEnvironment:
             "rate_utilization": np.sum(b_act, axis=0) / np.maximum(self.b_k, 1e-8),
             "compute_utilization": np.sum(c_act, axis=0) / np.maximum(self.c_m, 1e-8),
             "transport_utilization": np.sum(tau_act) / max(self.t_agg, 1e-8),
+            "b_act": b_act,
+            "c_act": c_act,
+            "tau_act": tau_act,
+            "x": x,
         }
         return self.get_state(), metrics
 
     def saa_urlcc_violation_probability(self, actions: Dict[str, np.ndarray], n_mc: int = 64, urlcc_idx: int = 1) -> float:
         """
         Monte Carlo estimate of Pr(D_urlcc > Dmax_urlcc) for the current slot dynamics.
+        Uses a dedicated evaluation RNG so SAA does not perturb the rollout stream.
         """
         b_prop = actions["b"].astype(float).copy()
         c_prop = actions["c"].astype(float).copy()
         tau_prop = actions["tau"].astype(float).copy()
-        x = actions["x"].astype(int).copy()
+        x = self._to_one_hot(actions["x"].astype(float))
         c_prop = c_prop * x
         b_act = self._round_prbs(self._enforce_domain_capacity(b_prop, self.b_k), self.b_k)
         c_act = self._enforce_domain_capacity(c_prop, self.c_m)
         tau_act = tau_prop * min(1.0, self.t_agg / max(np.sum(tau_prop), 1e-8))
+
         c_slice = np.sum(c_act, axis=1)
         omega = np.array([cfg.omega for cfg in self.slice_configs], dtype=float)
         exceed = 0
         for _ in range(n_mc):
-            lam = self.rng.uniform(8e5, 4.2e6, size=self.s)
-            gains = self.rng.exponential(scale=1.0, size=(self.s, self.k))
+            lam = self.rng_eval.uniform(8e5, 4.2e6, size=self.s)
+            gains = self.rng_eval.exponential(scale=1.0, size=(self.s, self.k))
             sinr = self._compute_sinr(gains)
             rates = np.sum(b_act * self.w_prb * np.log2(1.0 + sinr), axis=1)
             d_radio = 1.0 / np.maximum(rates - lam, 1e3) + self.t_tti
@@ -153,6 +179,18 @@ class FiveGEnvironment:
         mu_t = float(np.clip((1.0 - beta) * mu_t + beta * (mu_t + eta_mu * excess_t), 0.0, mu_max))
         self.prices = np.concatenate([mu_b, mu_c, np.array([mu_t])])
 
+    def _exogenous_at(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        if self.lambda_trace is not None and idx < self.lambda_trace.shape[0]:
+            lam = self.lambda_trace[idx].copy()
+        else:
+            lam = self.rng_dyn.uniform(8e5, 4.2e6, size=self.s)
+
+        if self.channel_trace is not None and idx < self.channel_trace.shape[0]:
+            ch = self.channel_trace[idx].copy()
+        else:
+            ch = self.rng_dyn.exponential(scale=1.0, size=(self.s, self.k))
+        return lam, ch
+
     def _compute_sinr(self, gains: np.ndarray) -> np.ndarray:
         inter = np.sum(gains * self.pk[None, :], axis=1, keepdims=True) - gains * self.pk[None, :]
         return (self.pk[None, :] * gains) / np.maximum(inter + self.n0 * self.w_prb, 1e-12)
@@ -166,28 +204,54 @@ class FiveGEnvironment:
         return out
 
     @staticmethod
+    def _to_one_hot(x: np.ndarray) -> np.ndarray:
+        x_out = np.zeros_like(x, dtype=int)
+        if x.ndim != 2 or x.shape[1] == 0:
+            return x_out
+        for s_idx in range(x.shape[0]):
+            m_idx = int(np.argmax(x[s_idx]))
+            x_out[s_idx, m_idx] = 1
+        return x_out
+
+    @staticmethod
     def _enforce_domain_capacity(prop: np.ndarray, cap: np.ndarray) -> np.ndarray:
         total = np.sum(prop, axis=0)
         scale = np.minimum(1.0, cap / np.maximum(total, 1e-9))
         return prop * scale[None, :]
 
     @staticmethod
-    def _round_prbs(b: np.ndarray, cap: np.ndarray) -> np.ndarray:
+    def _round_prbs(b: np.ndarray, cap: np.ndarray, marginal: np.ndarray | None = None) -> np.ndarray:
         b_int = np.floor(b).astype(int)
         for k in range(b.shape[1]):
-            rem = int(max(cap[k] - np.sum(b_int[:, k]), 0))
+            col_sum = int(np.sum(b_int[:, k]))
+            target = int(round(cap[k]))
+            rem = target - col_sum
+
             if rem > 0:
                 frac = b[:, k] - np.floor(b[:, k])
-                order = np.argsort(-frac)
-                for idx in order[:rem]:
-                    b_int[idx, k] += 1
+                if marginal is None:
+                    score = frac
+                else:
+                    score = marginal[:, k] + 1e-6 * frac
+                order = np.argsort(-score)
+                idx_pos = 0
+                while rem > 0:
+                    s_idx = int(order[idx_pos % len(order)])
+                    b_int[s_idx, k] += 1
+                    rem -= 1
+                    idx_pos += 1
+
             elif rem < 0:
                 over = -rem
-                order = np.argsort(-b_int[:, k])
-                for idx in order:
+                if marginal is None:
+                    score = b_int[:, k]
+                    order = np.argsort(-score)
+                else:
+                    order = np.argsort(marginal[:, k])
+                for s_idx in order:
                     if over <= 0:
                         break
-                    take = min(over, b_int[idx, k])
-                    b_int[idx, k] -= take
+                    take = min(over, b_int[s_idx, k])
+                    b_int[s_idx, k] -= take
                     over -= take
         return b_int.astype(float)
