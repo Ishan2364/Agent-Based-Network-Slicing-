@@ -1,58 +1,75 @@
-# 🛰️ AETHER_OS — Backend Guide (No Frontend Required)
+# 🛰️ AETHER_OS — 5G Network Slicing Research Platform
 
-This guide is for running the **Python research engine only** — no browser, no Node.js, no frontend needed.
-
----
-
-## 📋 What the Backend Does
-
-The backend is a Python application that:
-
-1. **Simulates a 5G network** — models base stations (gNBs), edge compute nodes (MECs), and network slices (eMBB, URLLC, mMTC)
-2. **Runs 5 competing algorithms** — each algorithm decides how to allocate bandwidth and compute resources every millisecond
-3. **Benchmarks and scores them** — records utility, delay, QoS success rate, and URLLC violation probability across many seeds and load levels
-4. **Generates output files** — CSV result tables + 14+ comparison plots as PNG images
-5. **Optionally serves a REST API** — so the frontend dashboard can trigger runs and fetch results
+A full-stack research platform that **benchmarks 5G network slicing algorithms** and visualises them in a live cinematic 3D dashboard.
 
 ---
 
-## ✅ Prerequisites
+## 📁 Project Structure
 
-- **Python 3.10 or newer** — check with `python --version`
-- **pip** — check with `pip --version`
-- That's it. No Node.js, no database, no Docker.
+```
+5G-project/
+├── backend/          ← Python research engine + REST API
+├── next_frontend/    ← ✅ Main website (Next.js 3D dashboard)
+└── frontend/         ← Legacy Vite prototype (not needed)
+```
+
+The **backend** runs algorithms and serves data. The **next_frontend** is the website that visualises everything. They talk to each other over HTTP on your local machine.
 
 ---
 
-## 🔧 Step 1 — Set Up the Python Environment
+## ✅ What You Need Installed
 
-Open a terminal and navigate into the backend folder:
+| Tool | Version | Check Command |
+|------|---------|--------------|
+| Python | 3.10 or newer | `python --version` |
+| Node.js | 18 or newer | `node --version` |
+| npm | 9 or newer | `npm --version` |
+| pip | any | `pip --version` |
+
+> **Download links:**
+> - Python → [python.org/downloads](https://www.python.org/downloads/)
+> - Node.js → [nodejs.org](https://nodejs.org/) (pick the LTS version)
+
+---
+
+## 🐍 PART 1 — Backend Setup
+
+> Do everything in this section in **Terminal 1**.
+
+### 1.1 — Open a terminal in the backend folder
 
 ```powershell
 cd C:\Users\Ojas\Desktop\5G-project\backend
 ```
 
-### Create a virtual environment
+---
 
-This keeps your project packages isolated from the rest of your system:
+### 1.2 — Create a Python virtual environment
+
+A virtual environment keeps your project's packages separate from the rest of your system. You only need to do this **once**.
 
 ```powershell
 python -m venv .venv
 ```
 
-### Activate the virtual environment
+---
+
+### 1.3 — Activate the virtual environment
+
+You need to do this **every time** you open a new terminal window before running the backend.
 
 **Windows — PowerShell:**
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
 
-> ⚠️ **Permission error?** Run this once, then retry:
+> ⚠️ If you see a red "cannot be loaded because running scripts is disabled" error:
 > ```powershell
 > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
+> Then run the activate command again.
 
-**Windows — Command Prompt (CMD):**
+**Windows — Command Prompt:**
 ```cmd
 .venv\Scripts\activate.bat
 ```
@@ -62,318 +79,410 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-✅ You'll know it worked when your terminal prompt shows `(.venv)` at the beginning.
+✅ **Success indicator:** Your prompt will now show `(.venv)` at the beginning, like:
+```
+(.venv) PS C:\Users\Ojas\Desktop\5G-project\backend>
+```
 
 ---
 
-## 📦 Step 2 — Install Dependencies
-
-With the virtual environment active:
+### 1.4 — Install Python dependencies
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-This installs these packages:
+This installs:
 
-| Package | What it's used for |
-|---------|-------------------|
-| `numpy` | Core math — channel simulation, PRB scheduling, array operations |
-| `pandas` | Result tables — reading/writing CSV files, groupby aggregations |
-| `matplotlib` | Plotting — all 14+ PNG charts |
-| `torch` | Neural networks — PPO policy training for MAAN and MAPPO algorithms |
-| `scipy` | Statistics — Wilcoxon tests, 95% confidence intervals |
-| `fastapi` | REST API — only needed if you want the web server |
-| `uvicorn` | ASGI server — only needed to serve the API |
+| Package | Used for |
+|---------|---------|
+| `numpy` | Array math, channel simulation, PRB scheduling |
+| `pandas` | Result tables, CSV read/write |
+| `matplotlib` | Generating all PNG charts |
+| `torch` | Neural network training (MAAN, MAPPO algorithms) |
+| `scipy` | Statistical significance tests, confidence intervals |
+| `fastapi` | REST API that the frontend connects to |
+| `uvicorn` | Web server that runs FastAPI |
 
-> ⚠️ **PyTorch (torch) note:** the default `pip install torch` gets the CPU version, which is fine for running experiments. If you have an NVIDIA GPU and want faster PPO training, visit [pytorch.org](https://pytorch.org/get-started/locally/) to get the CUDA build instead.
+> ⚠️ `torch` (PyTorch) is the largest download (~200–800 MB). This is normal.
+>
+> If the install fails with a torch error, try:
+> ```powershell
+> pip install torch --index-url https://download.pytorch.org/whl/cpu
+> pip install -r requirements.txt
+> ```
 
-**Verify the install worked:**
+**Verify everything installed correctly:**
 ```powershell
-python -c "import numpy, pandas, matplotlib, torch, scipy, fastapi; print('All good!')"
+python -c "import numpy, pandas, matplotlib, torch, scipy, fastapi; print('✅ All packages OK')"
 ```
 
 ---
 
-## 🧪 Step 3 — Run an Experiment
-
-> ⚠️ All commands below must be run from inside the `backend/` folder with the virtual environment active.
-
-### Option A — Quick Phase 1 Benchmark
-
-Runs all 5 algorithms across a basic set of load conditions. Faster, good for a first test.
-
-```powershell
-python -m src.experiments.run_benchmark
-```
-
-**What happens:**
-- Simulates 5 algorithms × multiple seeds × load scales
-- Prints progress to the terminal
-- Saves all results to `backend/outputs/`
-
-**Expected runtime:** ~2–5 minutes on a modern CPU
-
-**Output files:**
-```
-backend/outputs/
-├── benchmark_results.csv     ← raw per-timestep data for every run
-└── plots/
-    ├── utility_mean_vs_load.png
-    ├── qos_success_vs_load.png
-    ├── delay_mean_vs_load.png
-    └── ...  (14 charts total)
-```
-
----
-
-### Option B — Full Phase 2 Benchmark (Recommended)
-
-This is the complete research-grade run. It uses more seeds, sweeps more load levels, computes 95% confidence intervals, and runs statistical significance tests between algorithms.
-
-```powershell
-python -m src.experiments.run_benchmark_phase2
-```
-
-**What happens:**
-1. Generates common stochastic traces (traffic λ and channel gains) so all algorithms are evaluated on the identical random scenarios
-2. Runs all 5 algorithms: `MAAN_PPO`, `Independent_MAPPO_PPO`, `C_ADMM`, `Static_Greedy`, `OMD_BF`
-3. Sweeps 5 load scales: `0.8, 1.0, 1.2, 1.4, 1.6`
-4. Repeats with 6 independent seeds
-5. Aggregates results with 95% CI bands
-6. Runs pairwise Welch t-tests (MAAN_PPO vs all others)
-7. Saves all CSVs and 14 core plots + 6 publication plots
-
-**Expected runtime:** ~5–20 minutes (depends on your CPU and PPO training speed)
-
-**Output files:**
-```
-backend/outputs_phase2/
-├── benchmark_results_phase2.csv        ← full raw data (~millions of rows)
-├── summary_with_ci95.csv               ← per-algorithm means + CI per load level
-├── statistical_significance.csv        ← p-values for all pairwise comparisons
-├── config_used.json                    ← exact settings used for this run
-├── plots/                              ← core diagnostic charts
-│   ├── utility_mean_vs_load.png
-│   ├── qos_success_vs_load.png
-│   ├── delay_mean_vs_load.png
-│   ├── rate_mean_vs_load.png
-│   ├── fairness_jain_vs_load.png
-│   ├── radio_util_vs_load.png
-│   ├── compute_util_vs_load.png
-│   ├── transport_util_vs_load.png
-│   ├── urlcc_delay_vs_load.png
-│   ├── embb_rate_vs_load.png
-│   ├── d_radio_vs_load.png
-│   ├── d_trans_vs_load.png
-│   ├── d_comp_vs_load.png
-│   └── urlcc_violation_prob_saa_vs_load.png
-└── plots_publication/                  ← publication-quality figures
-    ├── convergence_utility_mean_high_load.png
-    ├── convergence_qos_success_high_load.png
-    ├── convergence_urlcc_delay_high_load.png
-    ├── urlcc_delay_cdf_high_load.png
-    ├── urlcc_delay_ccdf_high_load.png
-    ├── utility_mean_boxplot_by_load.png
-    ├── utility_mean_violin_by_load.png
-    ├── pareto_utility_vs_qos.png
-    ├── pareto_utility_vs_delay.png
-    ├── significance_heatmap_utility.png
-    ├── significance_heatmap_qos_success.png
-    ├── significance_heatmap_delay.png
-    ├── cadmm_primal_residual_vs_t.png
-    ├── cadmm_dual_residual_vs_t.png
-    ├── cadmm_rounds_vs_utility.png
-    ├── cadmm_avg_rounds_vs_load.png
-    └── runtime_overall_bar.png
-```
-
----
-
-### Option C — Ablation Studies
-
-Runs targeted ablation experiments comparing specific algorithm variants:
-
-```powershell
-python -m src.experiments.run_ablations
-```
-
----
-
-### Option D — API Server (Optional)
-
-If you want the REST API running (to connect the frontend later, or to trigger experiments remotely):
+### 1.5 — Start the Backend API Server
 
 ```powershell
 python main.py
 ```
 
-Or with uvicorn directly:
+You should see output like:
+```
+INFO:     Started server process [XXXX]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+✅ **The backend is now running at `http://localhost:8000`**
+
+**Verify it's working** — open a browser or run:
+```powershell
+curl http://localhost:8000/api/health
+# Should return: {"status":"ok"}
+```
+
+> 💡 **Interactive API docs** are available at: `http://localhost:8000/docs`
+
+**Keep this terminal open.** The API stops if you close it.
+
+---
+
+## 🌐 PART 2 — Frontend Setup
+
+> Open a **new, second terminal window** for this. Leave Terminal 1 running the backend.
+
+### 2.1 — Open a new terminal in the frontend folder
 
 ```powershell
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-The API starts at `http://localhost:8000`. Visit `http://localhost:8000/docs` for interactive API docs.
-
----
-
-## 🔬 Understanding the Experiment Parameters
-
-The Phase 2 benchmark is controlled by `ExpConfig` at the top of `run_benchmark_phase2.py`:
-
-```python
-@dataclass
-class ExpConfig:
-    horizon: int = 500          # Number of time slots (TTIs) per episode
-    seeds: int = 6              # How many independent random seeds to run
-    n_mc_urlcc: int = 64        # SAA samples for URLLC chance-constraint check
-    load_scales: tuple = (0.8, 1.0, 1.2, 1.4, 1.6)  # Traffic load multipliers
-    num_slices: int = 3         # Number of network slices (eMBB + URLLC + mMTC)
-    out_dir: str = "outputs_phase2"
-```
-
-**To run a faster test** (e.g. while debugging), edit these values temporarily — fewer seeds and a shorter horizon dramatically reduce runtime:
-
-```python
-# Quick test config (edit run_benchmark_phase2.py temporarily)
-cfg = ExpConfig(
-    horizon=100,    # was 500
-    seeds=2,        # was 6
-    n_mc_urlcc=16,  # was 64
-    load_scales=(0.8, 1.2, 1.6),  # was 5 values
-)
-```
-
-Or pass a custom config when calling from another script:
-
-```python
-from src.experiments.run_benchmark_phase2 import ExpConfig, run_experiment, save_tables, plot_all
-
-cfg = ExpConfig(horizon=100, seeds=2)
-result = run_experiment(cfg)
-result.to_csv("my_results.csv", index=False)
+cd C:\Users\Ojas\Desktop\5G-project\next_frontend
 ```
 
 ---
 
-## 📊 The 5 Algorithms
+### 2.2 — Install Node.js dependencies
 
-All algorithms compete in the same `FiveGEnvironment`, which models a real 5G radio access network:
+You only need to do this **once** (or after pulling new changes).
 
-| Algorithm | Internal Name | What it does |
-|-----------|--------------|-------------|
-| **MAAN_PPO** | `MAANPPOAllocator` | PPO neural agent that learns from dual-price signals. Penalises URLLC delay violations with a local QoS penalty term. |
-| **Independent MAPPO_PPO** | `IndependentMAPPOPPOAllocator` | Per-slice PPO agents with no coordination or price signals. Decentralised baseline. |
-| **C_ADMM** | `CADMMAllocator` | Consensus ADMM. Iterates across slices to reach a jointly feasible resource allocation. Tracks primal/dual residuals to stop early. |
-| **Static Greedy** | `StaticGreedyAllocator` | Fixed proportional weights with greedy QoS repair. Never adapts — the baseline floor every other algorithm must beat. |
-| **OMD Bandit (OMD_BF)** | `OMDBanditAllocator` | Online Mirror Descent with random perturbation-based gradient estimation. Zero-order / black-box method. |
+```powershell
+npm install
+```
 
----
+This will download packages into a `node_modules/` folder. It may take 1–3 minutes.
 
-## 🌍 The Network Environment
-
-The `FiveGEnvironment` (`src/environment/fiveg_env.py`) models these physical components:
-
-| Component | Default | Description |
-|-----------|---------|-------------|
-| Network slices (S) | 3 | eMBB (video/broadband), URLLC (low-latency), mMTC (IoT) |
-| Base stations / gNBs (K) | 3 | Each has 160 PRB (Physical Resource Block) budget |
-| MEC nodes (M) | 3 | Each has 350 compute units |
-| Backhaul capacity | 420 units | Shared transport across all slices |
-| Channel model | Rayleigh fading | Channel gains drawn from exponential distribution each TTI |
-| Traffic model | Uniform random λ | Packet arrival rates in [0.8M, 4.2M] packets/sec per slice |
-| TTI duration | 1 ms | Each time step = one 5G scheduling slot |
-
-**Per-slice QoS requirements** (default / load_scale = 1.0):
-
-| Slice | Min Rate (r_min) | Max Delay (d_max) | Service type |
-|-------|-----------------|-------------------|-------------|
-| eMBB | 45 Mbps | 28 ms | Broadband video |
-| URLLC | 15 Mbps | 8 ms | Ultra-low latency |
-| mMTC | 6 Mbps | 50 ms | IoT / sensor |
+> ⚠️ If you see peer dependency errors, use:
+> ```powershell
+> npm install --legacy-peer-deps
+> ```
 
 ---
 
-## 📈 Reading the Output CSVs
+### 2.3 — Start the Frontend Dev Server
 
-### `summary_with_ci95.csv`
+```powershell
+npm run dev
+```
 
-The most useful file for comparing algorithms. Columns you care about:
+You should see:
+```
+▲ Next.js 14.x.x
+- Local:        http://localhost:3000
+- Ready in Xs
+```
 
-| Column | Meaning |
-|--------|---------|
-| `algorithm` | Algorithm name |
-| `load_scale` | Traffic load multiplier |
-| `utility_mean_mean` | Average utility score (higher = better) |
-| `utility_mean_ci95` | 95% confidence interval half-width |
-| `qos_success_mean` | Fraction of time slots where ALL slices met QoS targets |
-| `delay_mean_mean` | Average end-to-end delay in seconds |
-| `urlcc_violation_prob_saa_mean` | Estimated probability URLLC delay exceeded d_max |
-| `fairness_jain_mean` | Jain's Fairness Index across slices (1.0 = perfectly fair) |
+✅ **The dashboard is now running at `http://localhost:3000`**
 
-### `statistical_significance.csv`
+Open `http://localhost:3000` in your browser.
 
-Shows whether the utility/QoS/delay gap between MAAN_PPO and each other algorithm is statistically significant:
+---
 
-| Column | Meaning |
-|--------|---------|
-| `utility_mean_pval_vs_MAAN_PPO` | p-value from Welch t-test; < 0.05 = significant |
+## 🖥️ PART 3 — Using the Dashboard
+
+With both servers running, open **`http://localhost:3000`** in your browser.
+
+### What you'll see
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  AETHER_OS           C_ADMM  MAAN  STATIC   [Run Full Research] [Result Plots] ● SIMULATION ACTIVE
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│           3D SPACE — Three glowing orbs orbit           │
+│           a central constellation node.                 │
+│                                                         │
+│           ● Green orb  = C_ADMM algorithm               │
+│           ● Red orb    = MAAN algorithm                 │
+│           ● Grey orb   = Static Greedy (baseline)       │
+│                                                         │
+│           An astronaut floats in zero-gravity,          │
+│           fleeing from your cursor.                     │
+│                                                         │
+│                ↓  scroll to explore  ↓                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### The 6 Scroll Sections (Beats)
+
+Scroll down through the page. Each full-screen section introduces one concept:
+
+| Beat | What you'll see |
+|------|----------------|
+| **Beat 0** — Orientation | Overview of all 3 algorithms with live score badges updating every 500ms |
+| **Beat 1** — C_ADMM | Deep-dive card with live sparkline + a **slider to control number of network slices** |
+| **Beat 2** — MAAN | Deep-dive card with live sparkline + a **slider to control network load** |
+| **Beat 3** — Static Greedy | Performance comparison bar showing why this is the baseline to beat |
+| **Beat 4** — Full System | Combined dashboard with scores, sparklines, and average utility for all algorithms |
+| **Beat 5** — Connect API | Input field to connect your own live 5G telemetry endpoint |
+
+### Navigation
+
+- **Scroll** normally to move between beats
+- **Dot indicators** on the right — click any dot to jump to that beat
+- **Top nav links** (C_ADMM / MAAN / STATIC_GREEDY) — click to jump directly to that algorithm's beat
+
+---
+
+## 🔬 PART 4 — Running a Research Benchmark
+
+This triggers the actual Python research engine to run a full experiment and generate results.
+
+### From the Dashboard (Recommended)
+
+1. Click the **"Run Full Research"** button in the top navigation bar
+2. A green progress bar appears next to the button showing `0% → 100%`
+3. The status message below the nav updates in real-time (e.g. *"Completed 3/60: seed=0 load=1.0 alg=C_ADMM"*)
+4. When complete, the **Result Plots gallery** opens automatically
+5. You can also click **"Result Plots"** at any time to view previously generated charts
+
+### From the Terminal (Alternative)
+
+In Terminal 1 (backend, venv active):
+
+**Quick benchmark — Phase 1** (~2–5 min):
+```powershell
+python -m src.experiments.run_benchmark
+```
+
+**Full research benchmark — Phase 2** (~5–20 min):
+```powershell
+python -m src.experiments.run_benchmark_phase2
+```
+
+---
+
+## 📊 The Algorithms Being Compared
+
+| Algorithm | What it does | Role |
+|-----------|-------------|------|
+| **MAAN_PPO** | Neural network agent trained with PPO. Uses dual price signals to learn resource allocation. | Main algorithm under test |
+| **Ind. MAPPO_PPO** | Separate PPO agent per slice, no coordination or price signals | Decentralised baseline |
+| **C_ADMM** | Consensus ADMM — splits the problem across slices and iterates toward a shared feasible solution | Distributed optimiser |
+| **Static Greedy** | Fixed proportional rules that never adapt to network conditions | Baseline floor |
+| **OMD Bandit** | Online Mirror Descent with bandit-style gradient estimation. No neural networks. | Black-box baseline |
+
+---
+
+## 📁 Output Files (After a Benchmark Run)
+
+```
+backend/
+├── outputs/                              ← Phase 1 results
+│   ├── benchmark_results.csv
+│   └── plots/*.png                       (14 charts)
+│
+└── outputs_phase2/                       ← Phase 2 results (full research)
+    ├── benchmark_results_phase2.csv      ← raw per-timestep data for all runs
+    ├── summary_with_ci95.csv             ← per-algorithm means + 95% CI
+    ├── statistical_significance.csv      ← p-values vs MAAN_PPO
+    ├── config_used.json                  ← exact experiment settings
+    ├── plots/*.png                       (14 diagnostic charts)
+    └── plots_publication/*.png           (6 publication-quality figures)
+```
+
+These PNG files are automatically served by the backend API and viewable in the **Result Plots** overlay in the dashboard.
+
+---
+
+## ⚙️ Configuration
+
+### Backend — Experiment Parameters
+
+Controlled by `ExpConfig` in `backend/src/experiments/run_benchmark_phase2.py`:
+
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `horizon` | 500 | Time slots per episode. Reduce to 100 for a quick test. |
+| `seeds` | 6 | Independent random runs per config. Reduce to 2 for speed. |
+| `load_scales` | `(0.8, 1.0, 1.2, 1.4, 1.6)` | Traffic load multipliers to sweep over. |
+| `n_mc_urlcc` | 64 | SAA samples for URLLC chance-constraint. Reduce to 16 for speed. |
+| `num_slices` | 3 | Number of network slices (eMBB + URLLC + mMTC). |
+
+### Frontend — Backend URL
+
+By default the frontend connects to `http://localhost:8000`. To change this, create a `.env.local` file in `next_frontend/`:
+
+```env
+NEXT_PUBLIC_BACKEND_URL=http://your-backend-host:8000
+```
+
+---
+
+## 🔄 Simulation vs Live Mode
+
+| Mode | When it's active | Data source |
+|------|-----------------|-------------|
+| **Simulation** (default) | Always — no backend needed | Browser generates fake sine-wave telemetry |
+| **Live** | After clicking "Run Full Research" | Backend serves real benchmark results |
+
+In Simulation Mode, the 3D orbs and sparklines still animate — the utilisation values are mathematically generated in the browser using sine functions that respond to the sliders.
 
 ---
 
 ## 🛠️ Troubleshooting
 
-### Virtual environment activation fails (PowerShell)
+### Backend won't start — "Port 8000 already in use"
+
+```powershell
+# Find what's using port 8000
+netstat -ano | findstr :8000
+
+# Kill it (replace 12345 with the actual PID shown)
+taskkill /PID 12345 /F
+```
+
+Then restart: `python main.py`
+
+---
+
+### Frontend can't connect to backend (fetch errors in browser console)
+
+1. Make sure the backend is actually running — check Terminal 1
+2. Visit `http://localhost:8000/api/health` in your browser — should show `{"status":"ok"}`
+3. Make sure both are on the same machine (backend on 8000, frontend on 3000)
+4. The backend has CORS fully open (`allow_origins=["*"]`), so CORS is not the issue
+
+---
+
+### `No module named 'torch'` when starting backend
+
+```powershell
+# Activate venv first, then:
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+---
+
+### `No module named 'src'` error
+
+You're running the Python command from the wrong folder. Must be inside `backend/`:
+```powershell
+cd C:\Users\Ojas\Desktop\5G-project\backend
+python -m src.experiments.run_benchmark_phase2
+```
+
+---
+
+### Virtual environment activation blocked by PowerShell
+
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### `No module named 'torch'` error
+---
+
+### `npm install` fails with peer dependency errors
+
 ```powershell
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+npm install --legacy-peer-deps
 ```
-
-### `No module named 'src'` error
-Make sure you're running commands **from inside the `backend/` folder**, not from the project root:
-```powershell
-cd C:\Users\Ojas\Desktop\5G-project\backend
-python -m src.experiments.run_benchmark_phase2
-```
-
-### Experiment is very slow
-Reduce the config to a quick test run:
-```powershell
-# Temporarily edit run_benchmark_phase2.py and change:
-# horizon=500 → horizon=100
-# seeds=6 → seeds=2
-```
-
-### `outputs_phase2` folder is empty / plots missing
-The folder is created automatically when you run the benchmark. If it exists but is empty, the experiment likely crashed mid-run. Check the terminal output for the error message.
-
-### Memory error during PPO training
-Reduce `n_mc_urlcc` (SAA samples) and `horizon` in `ExpConfig`. If running on a low-RAM machine, try `seeds=1` first.
 
 ---
 
-## ⚡ Quick Reference
+### Result Plots gallery is empty / shows nothing
 
-```powershell
-# 1. Navigate to backend
-cd C:\Users\Ojas\Desktop\5G-project\backend
+You need to run a benchmark first. The gallery only shows files that exist in `outputs_phase2/plots/`. Click **"Run Full Research"** in the nav bar and wait for it to complete.
 
-# 2. Activate virtual environment (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
+---
 
-# 3a. Run quick Phase 1 benchmark
-python -m src.experiments.run_benchmark
+### Benchmark is too slow
 
-# 3b. Run full Phase 2 benchmark (recommended)
-python -m src.experiments.run_benchmark_phase2
-
-# 3c. Start the REST API server (optional)
-python main.py
+Edit `run_benchmark_phase2.py` and temporarily use smaller values:
+```python
+cfg = ExpConfig(
+    horizon=100,       # was 500
+    seeds=2,           # was 6
+    n_mc_urlcc=16,     # was 64
+    load_scales=(0.8, 1.2, 1.6),  # was 5 values
+)
 ```
 
-Results → `backend/outputs/` (Phase 1) or `backend/outputs_phase2/` (Phase 2)
+---
+
+## ⚡ Quick Reference — All Commands
+
+```powershell
+# ─── BACKEND (Terminal 1) ─────────────────────────────────
+
+# Navigate to backend
+cd C:\Users\Ojas\Desktop\5G-project\backend
+
+# Activate virtual environment (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Install packages (first time only)
+pip install -r requirements.txt
+
+# Start the API server
+python main.py
+
+# ─── ALTERNATIVELY: run experiments directly ──────────────
+
+# Phase 1 quick benchmark
+python -m src.experiments.run_benchmark
+
+# Phase 2 full benchmark (recommended)
+python -m src.experiments.run_benchmark_phase2
+
+
+# ─── FRONTEND (Terminal 2) ────────────────────────────────
+
+# Navigate to frontend
+cd C:\Users\Ojas\Desktop\5G-project\next_frontend
+
+# Install packages (first time only)
+npm install
+
+# Start the dashboard
+npm run dev
+
+
+# ─── OPEN IN BROWSER ──────────────────────────────────────
+
+# Dashboard
+http://localhost:3000
+
+# API health check
+http://localhost:8000/api/health
+
+# API interactive docs
+http://localhost:8000/docs
+```
+
+---
+
+## 📌 Summary — Normal Workflow
+
+```
+ Terminal 1                        Terminal 2                  Browser
+─────────────                     ─────────────               ────────────────
+cd backend                        cd next_frontend
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt   npm install
+python main.py          →         npm run dev        →        http://localhost:3000
+[API running]           →         [Site running]     →        Click "Run Full Research"
+[Benchmark running...]                               ←        [Progress bar updates]
+[Done → plots saved]              ←                 ←        [Plot gallery opens]
+```
+
+---
+
+*Stack: Python 3.10+ · FastAPI · Uvicorn · Next.js 14 · Three.js · React Three Fiber · Framer Motion · PyTorch · TailwindCSS*
