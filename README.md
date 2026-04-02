@@ -12,17 +12,17 @@
 
 ### 1. Control Dashboard
 Monitor live simulated resources, manage orchestration parameters, and trigger massive multi-seed research evaluations in real-time.
-> **[ ! ] Place your dashboard photo here:**
+
 <img src="Dashboard.png" alt="Aether OS Dashboard" width="800"/>
 
 ### 2. Result Plot Analysis
 Live-generated `matplotlib` benchmarking data rendered directly into a sleek, filterable high-res plot gallery.
-> **[ ! ] Place your plot analysis photo here:**
+
 <img src="Plots Gallery.png" alt="Aether OS Plot Analysis" width="800"/>
 
 ### 3. Algorithm Deep-Dives & Visualizations
 Understand the exact physical and mathematical mechanics of advanced decentralized networks orchestrators. Features dynamic, step-by-step looping React visualizations for each algorithm (e.g., ADMM Consensus iterations, MAPPO Policy backprop) slowed down across 8 distinct phases so you can actually see the math working in real-time.
-> **[ ! ] Place your algorithms photo here:**
+
 <img src="Algorithms.png" alt="Aether OS Algorithms Overview" width="800"/>
 
 ### 4. Cinematic 3D Interactions
