@@ -1,0 +1,33 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project Generated Outputs (Keep git clean from heavy data/plots)
+outputs/
+outputs_phase2/
+plots/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Notebooks
+.ipynb_checkpoints
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/

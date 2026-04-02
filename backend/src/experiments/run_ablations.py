@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Add project root to Python path so it can find "src"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -58,6 +64,7 @@ def plot_ablation(df: pd.DataFrame, out_dir: Path) -> None:
 
 if __name__ == "__main__":
     out_dir = Path("outputs_phase2/ablations")
+    out_dir.mkdir(parents=True, exist_ok=True)  # Create directory first
     df_admm = run_admm_ablation()
     df_admm.to_csv(out_dir / "admm_rounds_ablation.csv", index=False)
     plot_ablation(df_admm, out_dir)

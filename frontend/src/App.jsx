@@ -1,70 +1,94 @@
-import React, { useState, useEffect } from 'react';
-import Scene from './components/Scene';
-import DashboardOverlay from './components/DashboardOverlay';
+import { useState } from 'react';
+import { Activity, ImageIcon, Settings, Cpu, BookOpen } from 'lucide-react';
+import JobControl from './components/JobControl';
+import StatusMonitor from './components/StatusMonitor';
+import PlotGallery from './components/PlotGallery';
+import AlgorithmsInfo from './components/AlgorithmsInfo';
 
-function App() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Fetch dynamic data from python backend API
-  useEffect(() => {
-    const fetchBenchmarkData = async () => {
-      try {
-        setLoading(true);
-        // Assuming fastapi runs on 8000
-        const response = await fetch('http://localhost:8000/api/results');
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const jsonData = await response.json();
-        
-        if (jsonData.error) {
-          throw new Error(jsonData.error);
-        }
-        
-        // Take unique algorithms for the 3D representation
-        if (Array.isArray(jsonData)) {
-          // Filter to just latest highest load or average it out.
-          // For visual purposes, let's group by algorithm.
-          const uniqueAlgos = Array.from(new Set(jsonData.map(item => item.algorithm)));
-          
-          const visualData = uniqueAlgos.map(algo => {
-            const algoItems = jsonData.filter(item => item.algorithm === algo);
-            // Get the item with highest load to represent the algo's peak performance
-            return algoItems.reduce((prev, current) => 
-              (prev.load > current.load) ? prev : current
-            );
-          });
-          
-          setData(visualData);
-        }
-        
-        setError(null);
-      } catch (err) {
-        console.error('Failed to fetch dynamic data:', err);
-        setError(err.message);
-        // Don't set data to null, keep previous data if available
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchBenchmarkData();
-    // Re-fetch every 10 seconds to make it feel like alive telemetry
-    const intervalId = setInterval(fetchBenchmarkData, 10000);
-    
-    return () => clearInterval(intervalId);
-  }, []);
+export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
 
   return (
-    <>
-      <Scene data={data} />
-      <DashboardOverlay data={data} loading={loading} error={error} />
-    </>
+    <div className="app-container">
+      {/* Sidebar */}
+      <aside className="sidebar">
+        <div style={{ padding: '0 16px 32px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Cpu color="var(--accent-primary)" size={32} style={{ filter: 'drop-shadow(0 0 8px rgba(0,240,255,0.6))' }} />
+          <h2 style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '0.1em' }} className="gradient-text">Aether_OS</h2>
+        </div>
+        
+        <button 
+          className={`nav-item ${activeTab === 'dashboard' ? 'active active-blue' : ''}`}
+          onClick={() => setActiveTab('dashboard')}
+          style={{ background: 'transparent', textAlign: 'left' }}
+        >
+          <Activity size={20} color={activeTab === 'dashboard' ? 'var(--accent-primary)' : 'var(--text-secondary)'} />
+          <span>Dashboard</span>
+        </button>
+        <button 
+          className={`nav-item ${activeTab === 'gallery' ? 'active active-purple' : ''}`}
+          onClick={() => setActiveTab('gallery')}
+          style={{ background: 'transparent', textAlign: 'left' }}
+        >
+          <ImageIcon size={20} color={activeTab === 'gallery' ? 'var(--accent-tertiary)' : 'var(--text-secondary)'} />
+          <span>Plots Gallery</span>
+        </button>
+        <button 
+          className={`nav-item ${activeTab === 'algorithms' ? 'active active-magenta' : ''}`}
+          onClick={() => setActiveTab('algorithms')}
+          style={{ background: 'transparent', textAlign: 'left' }}
+        >
+          <BookOpen size={20} color={activeTab === 'algorithms' ? 'var(--accent-secondary)' : 'var(--text-secondary)'} />
+          <span>Algorithms</span>
+        </button>
+        <button 
+          className="nav-item"
+          style={{ background: 'transparent', textAlign: 'left', marginTop: 'auto', opacity: 0.5 }}
+          disabled
+        >
+          <Settings size={20} />
+          <span>Settings</span>
+        </button>
+      </aside>
+
+      {/* Main Content */}
+      <main className="main-content">
+        <header className="animate-fade-in stagger-1">
+          <h1 className="gradient-text" style={{ fontSize: '2.5rem', marginBottom: '12px' }}>
+            {activeTab === 'dashboard' ? 'Simulation Control' 
+             : activeTab === 'algorithms' ? 'Algorithms Overview'
+             : 'Analysis Results'}
+          </h1>
+          <p style={{ color: 'var(--text-secondary)' }}>
+            {activeTab === 'dashboard' 
+              ? 'Configure and launch massive multi-algorithm evaluations.'
+              : activeTab === 'algorithms'
+              ? 'Learn about the 5G slicing algorithms being benchmarked.'
+              : 'View generated insights across different scaling loads.'}
+          </p>
+        </header>
+
+        {activeTab === 'dashboard' && (
+          <div className="bento-grid animate-fade-in stagger-2">
+            <div className="col-span-8">
+              <JobControl />
+            </div>
+            <div className="col-span-4">
+              <StatusMonitor />
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'gallery' && (
+          <div className="animate-fade-in stagger-2">
+            <PlotGallery />
+          </div>
+        )}
+
+        {activeTab === 'algorithms' && (
+          <AlgorithmsInfo />
+        )}
+      </main>
+    </div>
   );
 }
-
-export default App;
